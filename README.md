@@ -1,5 +1,7 @@
 # 🚀 Powerful SQL Commands for Backend/AI Engineers
 
+<img width="640" height="640" alt="Image" src="https://github.com/user-attachments/assets/f6008016-0565-4b3e-8a32-7594b8faf137" />
+
 ## 📖 Overview
 Основа основ! Для ML Platform Engineer'а знание мощных SQL команд = способность эффективно работать с feature stores, метриками моделей и большими датасетами. Поехали! 🔥
 
