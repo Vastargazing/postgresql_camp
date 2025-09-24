@@ -2038,3 +2038,918 @@ flowchart TD
 - **Level 3-4**: Middle уровень для backend систем  
 - **Level 5-6**: Senior уровень для ML Platform и enterprise
 
+# 🏗️ PostgreSQL: Creating Database & Tables from Scratch
+
+<img width="800" height="800" alt="Image" src="https://github.com/user-attachments/assets/dacba4a8-a9eb-4e44-8443-5e74d114f49b" />
+
+## 📖 Overview
+Полное руководство по созданию PostgreSQL базы данных с нуля и управлению таблицами! 🚀 Для Backend/AI Engineer это фундаментальные навыки для построения production-ready систем. От простейшей схемы до enterprise архитектуры с партиционированием и оптимизацией.
+
+## 🎯 Level 1: Database Creation - Основы
+
+<details>
+<summary>🏗️ <strong>Создание базы данных - первые шаги</strong></summary>
+
+```sql
+-- 🎯 Простое создание базы данных
+CREATE DATABASE ml_platform;
+-- 💡 Создает БД с настройками по умолчанию
+
+-- 🔧 Создание с дополнительными параметрами
+CREATE DATABASE ml_platform_prod
+WITH 
+  OWNER = ml_admin              -- владелец БД
+  ENCODING = 'UTF8'             -- кодировка (поддержка всех языков)
+  LC_COLLATE = 'en_US.UTF-8'    -- правила сортировки
+  LC_CTYPE = 'en_US.UTF-8'      -- классификация символов
+  TABLESPACE = pg_default       -- пространство таблиц
+  CONNECTION LIMIT = 100;       -- максимум подключений
+-- 🎯 Production-ready настройки для enterprise систем
+
+-- 📊 Создание БД из шаблона
+CREATE DATABASE ml_platform_test 
+WITH TEMPLATE ml_platform_prod;
+-- 💡 Копирует структуру и настройки существующей БД
+
+-- 🔍 Информация о созданных базах данных
+SELECT 
+  datname as database_name,
+  datowner::regrole as owner,
+  encoding,
+  datcollate as collation,
+  datctype as character_classification,
+  datconnlimit as connection_limit
+FROM pg_database 
+WHERE datname NOT IN ('template0', 'template1', 'postgres');
+-- 📈 Показывает все пользовательские БД и их настройки
+
+-- 🗑️ Удаление базы данных (осторожно!)
+DROP DATABASE IF EXISTS ml_platform_test;
+-- 🚨 Red Flag: Нельзя отменить! Всегда делай бэкап перед удалением
+
+-- 🔄 Подключение к созданной БД
+\c ml_platform
+-- 💡 psql команда для переключения на другую БД
+```
+
+**🎯 Рекомендации для production БД:**
+- Всегда указывай `OWNER` для контроля доступа
+- Используй `UTF8` encoding для международной поддержки  
+- Устанавливай `CONNECTION LIMIT` для контроля ресурсов
+- Создавай отдельные БД для dev/test/prod окружений
+
+**🚨 Red Flags при создании БД:**
+- Создание БД без указания owner'а (будет текущий пользователь)
+- Использование устаревших кодировок (не UTF8)
+- Отсутствие ограничений подключений в production
+- Создание production БД под суперпользователем postgres
+
+</details>
+
+## 🏢 Level 2: Basic Table Creation - Простые таблицы
+
+<details>
+<summary>📋 <strong>CREATE TABLE - от простого к сложному</strong></summary>
+
+```sql
+-- 🎯 Простейшая таблица пользователей
+CREATE TABLE users (
+  user_id SERIAL PRIMARY KEY,        -- автоинкремент + первичный ключ
+  email VARCHAR(255) NOT NULL,       -- обязательное поле
+  created_at TIMESTAMP DEFAULT NOW() -- значение по умолчанию
+);
+-- 💡 Минимальная структура с основными constraint'ами
+
+-- 📊 Расширенная таблица пользователей  
+CREATE TABLE users_extended (
+  user_id SERIAL PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,           -- уникальное поле
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(100),
+  last_name VARCHAR(100),
+  age INTEGER CHECK (age >= 13 AND age <= 120), -- валидация возраста
+  country_code CHAR(2),                         -- ISO код страны
+  is_active BOOLEAN DEFAULT true,               -- статус аккаунта
+  email_verified BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  last_login TIMESTAMP WITH TIME ZONE
+);
+-- 🎯 Production-ready структура с валидацией и метаданными
+
+-- 🔗 Таблица профилей с внешним ключом
+CREATE TABLE user_profiles (
+  profile_id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  bio TEXT,                                     -- длинный текст
+  avatar_url VARCHAR(500),
+  date_of_birth DATE,
+  phone VARCHAR(20),
+  timezone VARCHAR(50) DEFAULT 'UTC',
+  preferences JSONB,                            -- JSON данные с индексацией
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  -- 🔗 Внешний ключ с каскадным удалением
+  FOREIGN KEY (user_id) REFERENCES users_extended(user_id) 
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+-- 💡 Один профиль на пользователя, удаляется вместе с пользователем
+
+-- 🏷️ Enum типы для категориальных данных
+CREATE TYPE user_status AS ENUM ('active', 'inactive', 'suspended', 'deleted');
+CREATE TYPE subscription_tier AS ENUM ('free', 'basic', 'premium', 'enterprise');
+
+-- 💳 Таблица подписок с enum'ами
+CREATE TABLE subscriptions (
+  subscription_id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  tier subscription_tier NOT NULL DEFAULT 'free',
+  status user_status NOT NULL DEFAULT 'active',
+  price DECIMAL(10,2) CHECK (price >= 0),       -- точная арифметика для денег
+  billing_cycle INTEGER CHECK (billing_cycle IN (1, 3, 6, 12)), -- месяцы
+  starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  auto_renewal BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  -- 🔗 Связь с пользователем
+  FOREIGN KEY (user_id) REFERENCES users_extended(user_id) ON DELETE CASCADE,
+  
+  -- ✅ Проверка логичности дат
+  CHECK (expires_at > starts_at),
+  -- 🎯 Уникальность активной подписки на пользователя
+  UNIQUE (user_id) WHERE status = 'active'
+);
+
+-- 🤖 Таблица для ML моделей и экспериментов
+CREATE TABLE ml_models (
+  model_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- UUID вместо SERIAL
+  model_name VARCHAR(100) NOT NULL,
+  model_version VARCHAR(20) NOT NULL,
+  model_type VARCHAR(50) NOT NULL,              -- 'classification', 'regression', etc.
+  framework VARCHAR(30),                        -- 'scikit-learn', 'pytorch', etc.
+  hyperparameters JSONB,                        -- конфигурация модели
+  training_dataset_path VARCHAR(500),
+  model_artifact_path VARCHAR(500),
+  -- 📊 Метрики производительности
+  accuracy DECIMAL(5,4) CHECK (accuracy >= 0 AND accuracy <= 1),
+  precision_score DECIMAL(5,4) CHECK (precision_score >= 0 AND precision_score <= 1),
+  recall_score DECIMAL(5,4) CHECK (recall_score >= 0 AND recall_score <= 1),
+  f1_score DECIMAL(5,4) CHECK (f1_score >= 0 AND f1_score <= 1),
+  -- 🏷️ Статус и метаданные
+  status VARCHAR(20) DEFAULT 'training' 
+    CHECK (status IN ('training', 'completed', 'deployed', 'deprecated')),
+  trained_by INTEGER NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  deployed_at TIMESTAMP WITH TIME ZONE,
+  
+  -- 🔗 Связь с создателем модели
+  FOREIGN KEY (trained_by) REFERENCES users_extended(user_id),
+  -- 🎯 Уникальность версии модели
+  UNIQUE (model_name, model_version)
+);
+
+-- 📈 Таблица предсказаний с партиционированием по времени
+CREATE TABLE predictions (
+  prediction_id BIGSERIAL,
+  model_id UUID NOT NULL,
+  user_id INTEGER,                              -- может быть NULL для batch предсказаний
+  input_features JSONB NOT NULL,               -- входные признаки
+  prediction_result JSONB NOT NULL,            -- результат предсказания
+  confidence_score DECIMAL(5,4) CHECK (confidence_score >= 0 AND confidence_score <= 1),
+  processing_time_ms INTEGER CHECK (processing_time_ms >= 0),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  
+  -- 🔗 Внешние ключи
+  FOREIGN KEY (model_id) REFERENCES ml_models(model_id),
+  FOREIGN KEY (user_id) REFERENCES users_extended(user_id) ON DELETE SET NULL,
+  
+  -- 📅 Первичный ключ включает время для партиционирования
+  PRIMARY KEY (prediction_id, created_at)
+) PARTITION BY RANGE (created_at);
+-- 🎯 Партиционирование по времени для больших объемов данных
+```
+
+**🎯 Ключевые принципы создания таблиц:**
+- **PRIMARY KEY** на каждой таблице (SERIAL или UUID)
+- **NOT NULL** для обязательных полей
+- **CHECK constraints** для валидации данных
+- **FOREIGN KEY** для ссылочной целостности
+- **DEFAULT** значения для автоматического заполнения
+
+**🚨 Red Flags в CREATE TABLE:**
+- Таблицы без первичного ключа
+- VARCHAR без ограничения длины
+- Отсутствие NOT NULL на критичных полях  
+- Использование TEXT вместо VARCHAR для коротких строк
+- Игнорирование временных зон (TIMESTAMP vs TIMESTAMP WITH TIME ZONE)
+
+</details>
+
+## 🔧 Level 3: Table Modifications - ALTER TABLE
+
+<details>
+<summary>🔧 <strong>Изменение структуры таблиц - безопасные модификации</strong></summary>
+
+```sql
+-- 📊 Добавление новых колонок
+ALTER TABLE users_extended 
+ADD COLUMN middle_name VARCHAR(100);
+-- 💡 Добавляет колонку в конец таблицы
+
+-- 🔄 Добавление колонки с DEFAULT (безопасно для больших таблиц)
+ALTER TABLE users_extended 
+ADD COLUMN account_status VARCHAR(20) DEFAULT 'active' NOT NULL;
+-- 🎯 DEFAULT позволяет избежать блокировки при добавлении NOT NULL
+
+-- 🗑️ Удаление колонки (осторожно!)
+ALTER TABLE users_extended 
+DROP COLUMN middle_name;
+-- 🚨 Red Flag: Данные будут потеряны навсегда!
+
+-- 🔄 Изменение типа данных (может быть опасно)
+ALTER TABLE users_extended 
+ALTER COLUMN username TYPE VARCHAR(100);
+-- ✅ Безопасно: увеличение размера VARCHAR
+
+-- ⚠️ Потенциально опасное изменение типа
+ALTER TABLE users_extended 
+ALTER COLUMN age TYPE SMALLINT USING age::SMALLINT;
+-- 🎯 USING clause для контроля преобразования типов
+
+-- 🔒 Добавление и удаление constraint'ов
+-- Добавление проверки
+ALTER TABLE users_extended 
+ADD CONSTRAINT check_email_format 
+  CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$');
+-- 📧 Валидация формата email через регулярное выражение
+
+-- Добавление уникального ограничения
+ALTER TABLE users_extended 
+ADD CONSTRAINT unique_username UNIQUE (username);
+-- 🎯 Гарантирует уникальность username'ов
+
+-- Удаление constraint'а
+ALTER TABLE users_extended 
+DROP CONSTRAINT check_email_format;
+-- 💡 Удаляет ранее созданное ограничение
+
+-- 🔗 Работа с внешними ключами
+-- Добавление FK с отложенной проверкой
+ALTER TABLE user_profiles 
+ADD CONSTRAINT fk_user_profiles_user_id 
+  FOREIGN KEY (user_id) REFERENCES users_extended(user_id) 
+  ON DELETE CASCADE ON UPDATE CASCADE 
+  DEFERRABLE INITIALLY DEFERRED;
+-- 🎯 DEFERRABLE позволяет отложить проверку до конца транзакции
+
+-- 🏷️ Переименование элементов
+-- Переименование таблицы
+ALTER TABLE users_extended RENAME TO users;
+
+-- Переименование колонки  
+ALTER TABLE users RENAME COLUMN username TO user_name;
+
+-- Переименование constraint'а
+ALTER TABLE users RENAME CONSTRAINT unique_username TO unique_user_name;
+
+-- 🔄 Изменение DEFAULT значений
+ALTER TABLE users ALTER COLUMN is_active SET DEFAULT false;
+-- Установка нового значения по умолчанию
+
+ALTER TABLE users ALTER COLUMN is_active DROP DEFAULT;
+-- Удаление значения по умолчанию
+
+-- 📊 Сложные модификации с транзакциями
+BEGIN;
+  -- 🔄 Добавляем новую колонку
+  ALTER TABLE ml_models 
+  ADD COLUMN model_size_mb INTEGER;
+  
+  -- 📈 Заполняем данными на основе существующих
+  UPDATE ml_models 
+  SET model_size_mb = 
+    CASE 
+      WHEN model_type = 'deep_learning' THEN 150
+      WHEN model_type = 'tree_based' THEN 50
+      ELSE 25
+    END;
+  
+  -- ✅ Делаем колонку обязательной
+  ALTER TABLE ml_models 
+  ALTER COLUMN model_size_mb SET NOT NULL;
+  
+  -- 🎯 Добавляем валидацию
+  ALTER TABLE ml_models 
+  ADD CONSTRAINT check_model_size 
+    CHECK (model_size_mb > 0 AND model_size_mb < 10000);
+COMMIT;
+-- 💡 Все изменения в одной транзакции - либо все, либо ничего
+
+-- 🚀 Production-safe колонка добавление (для больших таблиц)
+-- Шаг 1: Добавляем nullable колонку
+ALTER TABLE predictions 
+ADD COLUMN batch_id UUID;
+
+-- Шаг 2: Заполняем данными небольшими порциями (в отдельных транзакциях)
+UPDATE predictions 
+SET batch_id = gen_random_uuid() 
+WHERE batch_id IS NULL 
+  AND prediction_id BETWEEN 1 AND 10000;
+-- Повторяем для всех диапазонов...
+
+-- Шаг 3: Делаем колонку NOT NULL после заполнения всех данных
+ALTER TABLE predictions 
+ALTER COLUMN batch_id SET NOT NULL;
+
+-- 🔍 Добавление индексов (отдельно от CREATE TABLE)
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_created_at ON users(created_at);
+CREATE INDEX idx_users_active_users ON users(is_active) WHERE is_active = true;
+-- 🎯 Partial index только для активных пользователей
+
+-- 🤖 Специальные индексы для AI/ML данных
+CREATE INDEX idx_ml_models_status_type ON ml_models(status, model_type);
+CREATE INDEX idx_predictions_model_created 
+  ON predictions(model_id, created_at) 
+  WHERE confidence_score >= 0.8;
+-- 📊 Составной индекс с условием для high-confidence предсказаний
+
+-- 🧹 VACUUM и ANALYZE после больших изменений
+VACUUM ANALYZE users;
+VACUUM ANALYZE ml_models;
+-- 💡 Обновляет статистику планировщика и очищает мертвые строки
+```
+
+**🎯 Best Practices для ALTER TABLE:**
+- **Тестируй на копии данных** перед production изменениями
+- **Используй транзакции** для множественных связанных изменений
+- **Добавляй DEFAULT** при создании NOT NULL колонок
+- **Планируй downtime** для критичных изменений типов данных
+- **Создавай индексы CONCURRENTLY** на live системах
+
+**🚨 Опасные операции ALTER TABLE:**
+- DROP COLUMN без резервной копии
+- Уменьшение размера VARCHAR на колонках с данными
+- Изменение типов данных без USING clause
+- Добавление NOT NULL без DEFAULT на больших таблицах
+- Переименование активно используемых колонок без координации
+
+</details>
+
+## 🏗️ Level 4: Advanced Table Features - Продвинутые возможности
+
+<details>
+<summary>🚀 <strong>Продвинутые техники создания таблиц</strong></summary>
+
+```sql
+-- 🎯 Создание таблиц с наследованием
+CREATE TABLE events (
+  event_id BIGSERIAL PRIMARY KEY,
+  event_type VARCHAR(50) NOT NULL,
+  user_id INTEGER,
+  event_data JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 🏷️ Дочерние таблицы наследуют структуру
+CREATE TABLE user_events (
+  session_id UUID,
+  page_url VARCHAR(500)
+) INHERITS (events);
+
+CREATE TABLE system_events (
+  severity_level INTEGER CHECK (severity_level BETWEEN 1 AND 5),
+  component VARCHAR(100)
+) INHERITS (events);
+-- 💡 Наследование позволяет специализировать таблицы
+
+-- 📅 Партиционирование по времени (современный подход)
+CREATE TABLE analytics_events (
+  event_id BIGSERIAL,
+  event_type VARCHAR(50) NOT NULL,
+  user_id INTEGER,
+  event_data JSONB,
+  revenue DECIMAL(10,2),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  PRIMARY KEY (event_id, created_at)
+) PARTITION BY RANGE (created_at);
+
+-- 📊 Создание партиций
+CREATE TABLE analytics_events_2024_01 
+PARTITION OF analytics_events 
+FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+
+CREATE TABLE analytics_events_2024_02 
+PARTITION OF analytics_events 
+FOR VALUES FROM ('2024-02-01') TO ('2024-03-01');
+
+-- 🔄 Автоматическое создание партиций (через расширение pg_partman)
+-- CREATE EXTENSION pg_partman;
+-- SELECT partman.create_parent(
+--   p_parent_table => 'analytics_events',
+--   p_control => 'created_at',
+--   p_type => 'range',
+--   p_interval => 'monthly'
+-- );
+
+-- 🗂️ Партиционирование по хешу для равномерного распределения
+CREATE TABLE user_interactions (
+  interaction_id BIGSERIAL,
+  user_id INTEGER NOT NULL,
+  action_type VARCHAR(50),
+  target_id INTEGER,
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  PRIMARY KEY (interaction_id, user_id)
+) PARTITION BY HASH (user_id);
+
+-- Создание хеш-партиций
+CREATE TABLE user_interactions_hash_0 
+PARTITION OF user_interactions 
+FOR VALUES WITH (modulus 4, remainder 0);
+
+CREATE TABLE user_interactions_hash_1 
+PARTITION OF user_interactions 
+FOR VALUES WITH (modulus 4, remainder 1);
+
+CREATE TABLE user_interactions_hash_2 
+PARTITION OF user_interactions 
+FOR VALUES WITH (modulus 4, remainder 2);
+
+CREATE TABLE user_interactions_hash_3 
+PARTITION OF user_interactions 
+FOR VALUES WITH (modulus 4, remainder 3);
+
+-- 🎯 Таблица с полнотекстовым поиском
+CREATE TABLE documents (
+  document_id SERIAL PRIMARY KEY,
+  title VARCHAR(200) NOT NULL,
+  content TEXT NOT NULL,
+  author_id INTEGER,
+  category VARCHAR(50),
+  -- 🔍 Поле для полнотекстового поиска
+  search_vector tsvector GENERATED ALWAYS AS (
+    to_tsvector('english', title || ' ' || content)
+  ) STORED,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  FOREIGN KEY (author_id) REFERENCES users(user_id)
+);
+
+-- Индекс для полнотекстового поиска
+CREATE INDEX idx_documents_search ON documents USING GIN (search_vector);
+
+-- 🤖 Таблица для векторного поиска (pgvector extension)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE embeddings (
+  embedding_id SERIAL PRIMARY KEY,
+  content_id INTEGER NOT NULL,
+  content_type VARCHAR(50) NOT NULL, -- 'product', 'article', 'user_profile'
+  embedding vector(768),              -- 768-dimensional embedding
+  model_name VARCHAR(100) DEFAULT 'text-embedding-ada-002',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  -- 🎯 Составной индекс для фильтрации по типу + векторный поиск
+  UNIQUE (content_id, content_type)
+);
+
+-- Векторные индексы для similarity search
+CREATE INDEX idx_embeddings_cosine ON embeddings 
+  USING ivfflat (embedding vector_cosine_ops) 
+  WITH (lists = 100);
+
+CREATE INDEX idx_embeddings_l2 ON embeddings 
+  USING ivfflat (embedding vector_l2_ops) 
+  WITH (lists = 100);
+
+-- 📊 Таблица с JSON колонками и индексами
+CREATE TABLE user_analytics (
+  analytics_id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  -- 📈 Структурированные метрики
+  session_metrics JSONB NOT NULL DEFAULT '{}',
+  behavioral_features JSONB NOT NULL DEFAULT '{}',
+  ml_predictions JSONB NOT NULL DEFAULT '{}',
+  last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+-- 🔍 GIN индексы для эффективного поиска по JSON
+CREATE INDEX idx_user_analytics_session_gin 
+  ON user_analytics USING GIN (session_metrics);
+
+-- 🎯 Частичные индексы для специфических JSON запросов
+CREATE INDEX idx_user_analytics_high_engagement 
+  ON user_analytics (user_id) 
+  WHERE (session_metrics->>'engagement_score')::numeric > 80;
+
+-- 📈 Индекс на JSON path для прямых запросов
+CREATE INDEX idx_user_analytics_churn_risk 
+  ON user_analytics ((ml_predictions->>'churn_probability')) 
+  WHERE (ml_predictions->>'churn_probability')::numeric > 0.7;
+
+-- 🏷️ Таблица с enum и массивами
+CREATE TYPE skill_level AS ENUM ('beginner', 'intermediate', 'advanced', 'expert');
+
+CREATE TABLE user_skills (
+  skill_id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  programming_languages VARCHAR(50)[],      -- массив языков программирования
+  frameworks VARCHAR(100)[],                -- массив фреймворков  
+  skill_levels skill_level[] NOT NULL,      -- массив уровней навыков
+  certifications JSONB DEFAULT '[]',        -- JSON массив сертификатов
+  last_assessment_date DATE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  
+  -- ✅ Проверка соответствия размеров массивов
+  CHECK (array_length(programming_languages, 1) = array_length(skill_levels, 1))
+);
+
+-- 🔍 Индексы для работы с массивами
+CREATE INDEX idx_user_skills_languages 
+  ON user_skills USING GIN (programming_languages);
+
+-- 🎯 Временная таблица для ETL процессов
+CREATE TEMPORARY TABLE temp_data_import (
+  raw_id INTEGER,
+  raw_data JSONB,
+  processed BOOLEAN DEFAULT false,
+  import_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+-- 💡 TEMPORARY таблицы автоматически удаляются после сессии
+
+-- 🔄 Таблица с автоматическим обновлением timestamp'а
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Применяем trigger к таблице
+CREATE TRIGGER update_users_updated_at 
+  BEFORE UPDATE ON users 
+  FOR EACH ROW 
+  EXECUTE FUNCTION update_updated_at_column();
+-- 🎯 Автоматически обновляет updated_at при любом UPDATE
+
+-- 📊 Materialized View для сложной аналитики
+CREATE MATERIALIZED VIEW user_engagement_summary AS
+SELECT 
+  u.user_id,
+  u.email,
+  COUNT(ui.interaction_id) as total_interactions,
+  AVG((ua.session_metrics->>'engagement_score')::numeric) as avg_engagement,
+  MAX(ui.created_at) as last_activity,
+  CASE 
+    WHEN AVG((ua.session_metrics->>'engagement_score')::numeric) >= 80 THEN 'High'
+    WHEN AVG((ua.session_metrics->>'engagement_score')::numeric) >= 50 THEN 'Medium'
+    ELSE 'Low'
+  END as engagement_tier
+FROM users u
+LEFT JOIN user_interactions ui ON u.user_id = ui.user_id
+LEFT JOIN user_analytics ua ON u.user_id = ua.user_id  
+WHERE u.is_active = true
+GROUP BY u.user_id, u.email;
+
+-- Индекс на Materialized View
+CREATE INDEX idx_engagement_summary_tier ON user_engagement_summary(engagement_tier);
+
+-- 🔄 Обновление Materialized View
+REFRESH MATERIALIZED VIEW CONCURRENTLY user_engagement_summary;
+-- 💡 CONCURRENTLY позволяет обновлять без блокировки читающих запросов
+```
+
+**🎯 Когда использовать продвинутые техники:**
+- **Партиционирование**: Таблицы >100GB, время-ориентированные данные
+- **Наследование**: Схожие таблицы с разными специализациями
+- **JSONB**: Полуструктурированные данные, flexible schema
+- **Vectors**: AI/ML embeddings, similarity search
+- **Materialized Views**: Сложная аналитика с предвычислениями
+
+**🚨 Red Flags в продвинутых техниках:**
+- Преждевременное партиционирование маленьких таблиц
+- Использование наследования вместо простых внешних ключей
+- JSONB для данных, которые лучше подходят для реляционной модели
+- Materialized Views без стратегии обновления
+- Векторные индексы на малых данных (< 10K записей)
+
+</details>
+
+## 🔧 Level 5: Table Maintenance & Optimization
+
+<details>
+<summary>⚡ <strong>Обслуживание и оптимизация таблиц</strong></summary>
+
+```sql
+-- 📊 Анализ размеров таблиц и индексов
+SELECT 
+  schemaname,
+  tablename,
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as total_size,
+  pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) as table_size,
+  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - 
+                 pg_relation_size(schemaname||'.'||tablename)) as index_size,
+  -- 📈 Процент индексов от общего размера
+  ROUND(
+    (pg_total_relation_size(schemaname||'.'||tablename) - 
+     pg_relation_size(schemaname||'.'||tablename)) * 100.0 / 
+    pg_total_relation_size(schemaname||'.'||tablename), 2
+  ) as index_ratio_percent
+FROM pg_tables 
+WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+LIMIT 20;
+
+-- 🧹 VACUUM и ANALYZE операции
+-- Обычный VACUUM (освобождает место для переиспользования)
+VACUUM users;
+
+-- VACUUM FULL (возвращает место операционной системе, блокирует таблицу)
+VACUUM FULL users;  -- ⚠️ Осторожно: полная блокировка!
+
+-- ANALYZE обновляет статистику планировщика
+ANALYZE users;
+
+-- Комбинированная операция
+VACUUM ANALYZE users;
+
+-- 📊 Автоматический VACUUM (настройка на уровне таблицы)
+ALTER TABLE user_interactions SET (
+  autovacuum_vacuum_scale_factor = 0.1,      -- VACUUM при 10% мертвых строк
+  autovacuum_analyze_scale_factor = 0.05,    -- ANALYZE при 5% изменений
+  autovacuum_vacuum_cost_limit = 2000,       -- лимит стоимости операций
+  autovacuum_naptime = 60                    -- проверка каждые 60 секунд
+);
+
+-- 🔍 Мониторинг статистики VACUUM
+SELECT 
+  schemaname,
+  tablename,
+  n_live_tup as live_rows,
+  n_dead_tup as dead_rows,
+  CASE 
+    WHEN n_live_tup > 0 
+    THEN ROUND(n_dead_tup * 100.0 / (n_live_tup + n_dead_tup), 2)
+    ELSE 0 
+  END as dead_row_percent,
+  last_vacuum,
+  last_autovacuum,
+  last_analyze,
+  last_autoanalyze,
+  vacuum_count,
+  autovacuum_count
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+
+-- 📈 Реиндексация для восстановления производительности
+-- Проверка bloat индексов
+SELECT 
+  schemaname,
+  tablename,
+  indexname,
+  pg_size_pretty(pg_relation_size(indexname::regclass)) as index_size,
+  idx_scan as times_used,
+  idx_tup_read as tuples_read,
+  idx_tup_fetch as tuples_fetched
+FROM pg_stat_user_indexes
+ORDER BY pg_relation_size(indexname::regclass) DESC;
+
+-- Реиндексация конкретного индекса
+REINDEX INDEX idx_users_email;
+
+-- Реиндексация всей таблицы  
+REINDEX TABLE users;
+
+-- 🔄 REINDEX CONCURRENTLY (PostgreSQL 12+, не блокирует)
+REINDEX INDEX CONCURRENTLY idx_users_email;
+
+-- 🎯 Создание нового индекса взамен старого без downtime
+CREATE INDEX CONCURRENTLY idx_users_email_new ON users(email);
+-- Проверяем что индекс создался успешно
+DROP INDEX idx_users_email;
+ALTER INDEX idx_users_email_new RENAME TO idx_users_email;
+
+-- 📊 Статистика использования колонок (для выявления неиспользуемых)
+SELECT 
+  schemaname,
+  tablename,
+  attname as column_name,
+  n_distinct,      -- количество уникальных значений
+  correlation,     -- корреляция с физическим порядком
+  most_common_vals[1:3] as top_values,  -- самые частые значения
+  most_common_freqs[1:3] as frequencies -- их частоты
+FROM pg_stats
+WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
+  AND tablename = 'users'
+ORDER BY n_distinct DESC;
+
+-- 🔧 Управление constraint'ами для производительности
+-- Отключение FK проверок для bulk операций
+ALTER TABLE user_profiles DISABLE TRIGGER ALL;
+-- Массовая вставка данных...
+ALTER TABLE user_profiles ENABLE TRIGGER ALL;
+
+-- 🎯 Проверка целостности после bulk операций
+-- Проверка FK constraint'ов
+ALTER TABLE user_profiles 
+  VALIDATE CONSTRAINT fk_user_profiles_user_id;
+
+-- 📈 Сбор расширенной статистики для сложных запросов
+-- Статистика по множественным колонкам
+CREATE STATISTICS stats_users_country_age 
+ON country_code, age 
+FROM users;
+
+-- Статистика по выражениям
+CREATE STATISTICS stats_users_full_name 
+ON (first_name || ' ' || last_name)
+FROM users;
+
+-- Обновление статистики
+ANALYZE users;
+
+-- 🔍 Monitoring долгих операций DDL
+SELECT 
+  pid,
+  now() - pg_stat_activity.query_start as duration,
+  query,
+  state
+FROM pg_stat_activity 
+WHERE state != 'idle'
+  AND query ILIKE '%ALTER%'
+     OR query ILIKE '%CREATE INDEX%'
+     OR query ILIKE '%REINDEX%'
+ORDER BY duration DESC;
+
+-- 🚨 Принудительная остановка долгой операции (осторожно!)
+-- SELECT pg_cancel_backend(pid);  -- мягкая остановка
+-- SELECT pg_terminate_backend(pid);  -- принудительная остановка
+
+-- 📊 Checkpoint и WAL мониторинг
+SELECT 
+  checkpoint_timed,
+  checkpoint_req,
+  checkpoint_write_time,
+  checkpoint_sync_time,
+  buffers_checkpoint,
+  buffers_clean,
+  maxwritten_clean
+FROM pg_stat_bgwriter;
+
+-- 🔄 Ручной checkpoint (для консистентного бэкапа)
+CHECKPOINT;
+
+-- 📈 Анализ табличных пространств
+SELECT 
+  spcname as tablespace_name,
+  pg_tablespace_location(oid) as location,
+  pg_size_pretty(pg_tablespace_size(spcname)) as size
+FROM pg_tablespace;
+
+-- 🎯 Создание отдельного табличного пространства для больших данных
+-- CREATE TABLESPACE large_data 
+--   LOCATION '/var/lib/postgresql/large_data';
+
+-- CREATE TABLE big_analytics_data (
+--   ...
+-- ) TABLESPACE large_data;
+
+-- 🧹 Автоматизация maintenance задач
+-- Пример скрипта для регулярного обслуживания
+DO $
+DECLARE
+  table_record RECORD;
+  dead_ratio NUMERIC;
+BEGIN
+  FOR table_record IN 
+    SELECT schemaname, tablename 
+    FROM pg_tables 
+    WHERE schemaname = 'public'
+  LOOP
+    -- Получаем процент мертвых строк
+    SELECT 
+      CASE 
+        WHEN n_live_tup > 0 
+        THEN n_dead_tup * 100.0 / (n_live_tup + n_dead_tup)
+        ELSE 0 
+      END 
+    INTO dead_ratio
+    FROM pg_stat_user_tables 
+    WHERE schemaname = table_record.schemaname 
+      AND tablename = table_record.tablename;
+    
+    -- VACUUM если больше 20% мертвых строк
+    IF dead_ratio > 20 THEN
+      EXECUTE format('VACUUM ANALYZE %I.%I', 
+                     table_record.schemaname, 
+                     table_record.tablename);
+      RAISE NOTICE 'VACUUM performed on %.% (dead ratio: %)', 
+                   table_record.schemaname,
+                   table_record.tablename, 
+                   dead_ratio;
+    END IF;
+  END LOOP;
+END $;
+```
+
+**🎯 Регулярные maintenance задачи:**
+- **Еженедельно**: VACUUM ANALYZE на активных таблицах
+- **Ежемесячно**: REINDEX на сильно изменяемых индексах
+- **По необходимости**: Сбор расширенной статистики
+- **Мониторинг**: Размеры таблиц, bloat индексов, мертвые строки
+
+**🚨 Red Flags в maintenance:**
+- VACUUM FULL на production без maintenance window
+- REINDEX без CONCURRENTLY на активных системах
+- Игнорирование autovacuum warnings
+- Отсутствие мониторинга размеров и производительности
+- Ручное отключение constraint'ов без последующей валидации
+
+</details>
+
+## 🎨 Mermaid: Database Creation Workflow
+
+```mermaid
+flowchart TD
+    A[🎯 Database Planning] --> B[📋 Requirements Analysis]
+    B --> C[🏗️ CREATE DATABASE]
+    
+    C --> D[🔧 Basic Tables]
+    D --> E[📊 Primary Keys + Constraints]
+    E --> F[🔗 Foreign Keys + Relationships]
+    
+    F --> G[📈 Indexes Creation]
+    G --> H[🎯 Data Population]
+    
+    H --> I{Production Ready?}
+    I -->|No| J[🔧 ALTER TABLE Modifications]
+    J --> K[📊 Test Performance]
+    K --> I
+    
+    I -->|Yes| L[🚀 Advanced Features]
+    L --> M[📅 Partitioning]
+    L --> N[🔍 Full-text Search]  
+    L --> O[🤖 Vector Extensions]
+    
+    M --> P[⚡ Maintenance Setup]
+    N --> P
+    O --> P
+    
+    P --> Q[🧹 VACUUM/ANALYZE]
+    P --> R[📊 Monitoring]
+    P --> S[🔄 Backup Strategy]
+    
+    Q --> T[✅ Production Database]
+    R --> T
+    S --> T
+    
+    style A fill:#e8f5e8
+    style C fill:#e1f5fe
+    style I fill:#fff3e0
+    style L fill:#f3e5f5
+    style T fill:#e8f5e8
+```
+
+## 🎯 Summary
+
+Теперь у вас есть **полное руководство по созданию PostgreSQL баз данных**! 🚀
+
+**Ключевые этапы разработки БД:**
+
+### 📋 **Planning Phase**
+- Анализ требований и data model
+- Выбор типов данных и constraint'ов
+- Планирование индексной стратегии
+
+### 🏗️ **Implementation Phase**  
+- CREATE DATABASE с правильными настройками
+- CREATE TABLE с валидацией и связями
+- Создание индексов для производительности
+
+### 🔧 **Evolution Phase**
+- ALTER TABLE для изменения структуры
+- Добавление продвинутых возможностей
+- Партиционирование и оптимизация
+
+### ⚡ **Maintenance Phase**
+- Регулярный VACUUM и ANALYZE
+- Мониторинг размеров и производительности  
+- Реиндексация и оптимизация
+
+**Production-Ready принципы:**
+- ✅ Всегда используй транзакции для связанных изменений
+- ✅ Тестируй ALTER TABLE на копии данных
+- ✅ Создавай индексы CONCURRENTLY на live системах
+- ✅ Настраивай autovacuum для каждой таблицы
+- ✅ Мониторь размеры, bloat и производительность
+
+От простейших таблиц до enterprise-архитектуры с партиционированием - теперь вы готовы создавать **масштабируемые и производительные** PostgreSQL системы! 🎯✨
