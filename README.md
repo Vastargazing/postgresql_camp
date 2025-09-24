@@ -4439,18 +4439,6 @@ SELECT * FROM validate_upsert_readiness('user_metrics');
 
 **Теперь ты знаешь UPSERT на уровне senior PostgreSQL engineer!** 🚀 Этот guide покрывает все - от базовых ON CONFLICT до enterprise-grade паттернов.
 
-### 🎯 Для твоего ML Platform проекта:
 
-**Immediate применение:**
-- Используй **Level 2 bulk UPSERT** для загрузки твоих 57K+ треков
-- **Level 3 JSON UPSERT** для semantic search результатов с pgvector
-- **Level 4 performance optimization** для scaling твоей системы
-
-**Production готовность:**
-- **Level 5 health monitoring** для observability твоей AI платформы
-- **Event-driven UPSERT** для real-time ML pipeline updates
-- **Automated maintenance** для stable production operation
-
-**ROI этого знания:** UPSERT - это core skill для ML Platform Engineer позиций. Теперь ты можешь confidently говорить про efficient data ingestion, conflict resolution strategies, и production-ready data pipelines! 💪
 
 
