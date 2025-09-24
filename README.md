@@ -2953,3 +2953,1504 @@ flowchart TD
 - ✅ Мониторь размеры, bloat и производительность
 
 От простейших таблиц до enterprise-архитектуры с партиционированием - теперь вы готовы создавать **масштабируемые и производительные** PostgreSQL системы! 🎯✨
+
+# 🔄 PostgreSQL UPSERT: INSERT + UPDATE в одном запросе
+
+<img width="800" height="800" alt="Image" src="https://github.com/user-attachments/assets/283fe459-a2f7-491d-a975-66b2caeea658" />
+
+## 📖 Overview
+Полное руководство по UPSERT операциям в PostgreSQL! 🚀 UPSERT (INSERT + UPDATE) - критически важная техника для Backend/AI Engineers при работе с данными, которые могут как создаваться, так и обновляться. От простейших случаев до сложной логики с множественными conflict resolution стратегиями.
+
+## 🎯 Level 1: Basic UPSERT - Основы ON CONFLICT
+
+<details>
+<summary>🔄 <strong>INSERT ... ON CONFLICT - базовый UPSERT</strong></summary>
+
+```sql
+-- 🎯 Простейший UPSERT для пользователей
+INSERT INTO users (email, username, first_name, last_name)
+VALUES ('john.doe@example.com', 'johndoe', 'John', 'Doe')
+ON CONFLICT (email)           -- если email уже существует
+DO UPDATE SET 
+  username = EXCLUDED.username,      -- обновляем из новых данных
+  first_name = EXCLUDED.first_name,  -- EXCLUDED = новые значения
+  last_name = EXCLUDED.last_name,
+  updated_at = NOW();               -- обновляем timestamp
+-- 💡 Если email существует - обновляем, если нет - создаем запись
+
+-- 🔍 UPSERT с условной логикой
+INSERT INTO user_profiles (user_id, bio, location, website)
+VALUES (12345, 'AI Engineer passionate about ML', 'San Francisco', 'https://johndoe.dev')
+ON CONFLICT (user_id)
+DO UPDATE SET 
+  bio = CASE 
+    WHEN EXCLUDED.bio IS NOT NULL AND LENGTH(EXCLUDED.bio) > LENGTH(user_profiles.bio)
+    THEN EXCLUDED.bio           -- обновляем только если новое описание длиннее
+    ELSE user_profiles.bio      -- иначе оставляем старое
+  END,
+  location = COALESCE(EXCLUDED.location, user_profiles.location),  -- обновляем если не NULL
+  website = EXCLUDED.website,   -- всегда обновляем website
+  updated_at = NOW();
+-- 🎯 Умная логика обновления - сохраняем лучшие данные
+
+-- 📊 UPSERT для счетчиков и метрик
+INSERT INTO user_activity_counters (user_id, activity_date, page_views, clicks, time_spent_minutes)
+VALUES (12345, CURRENT_DATE, 1, 1, 5)
+ON CONFLICT (user_id, activity_date)    -- составной ключ конфликта
+DO UPDATE SET 
+  page_views = user_activity_counters.page_views + EXCLUDED.page_views,
+  clicks = user_activity_counters.clicks + EXCLUDED.clicks,
+  time_spent_minutes = user_activity_counters.time_spent_minutes + EXCLUDED.time_spent_minutes,
+  updated_at = NOW();
+-- 💡 Накапливаем метрики вместо перезаписи
+
+-- 🏷️ UPSERT с использованием WHERE условия
+INSERT INTO product_inventory (product_id, warehouse_id, quantity, reserved_quantity)
+VALUES (67890, 1, 100, 0)
+ON CONFLICT (product_id, warehouse_id)
+DO UPDATE SET 
+  quantity = EXCLUDED.quantity,
+  updated_at = NOW()
+WHERE product_inventory.quantity != EXCLUDED.quantity;  -- обновляем только при изменении
+-- ⚡ Условие WHERE экономит ненужные обновления
+
+-- 🚨 UPSERT с игнорированием конфликтов  
+INSERT INTO user_login_attempts (user_id, login_date, attempt_count)
+VALUES (12345, CURRENT_DATE, 1)
+ON CONFLICT (user_id, login_date) 
+DO NOTHING;                    -- просто игнорируем если запись существует
+-- 💡 Полезно для предотвращения дублирования данных без обновления
+
+-- 📈 UPSERT для временных рядов данных
+INSERT INTO daily_metrics (metric_date, total_users, active_users, revenue)
+VALUES ('2024-01-15', 15000, 8500, 125000.00)
+ON CONFLICT (metric_date)
+DO UPDATE SET 
+  total_users = GREATEST(daily_metrics.total_users, EXCLUDED.total_users),    -- берем максимум
+  active_users = GREATEST(daily_metrics.active_users, EXCLUDED.active_users),
+  revenue = daily_metrics.revenue + EXCLUDED.revenue,  -- накапливаем доход
+  calculation_version = COALESCE(daily_metrics.calculation_version, 0) + 1,   -- версионность
+  updated_at = NOW();
+-- 🎯 Сложная логика для агрегированных метрик
+
+-- 🔄 UPSERT с RETURNING для получения результата
+INSERT INTO user_sessions (user_id, session_token, expires_at, device_info)
+VALUES (12345, 'abc123token', NOW() + INTERVAL '24 hours', '{"device": "mobile", "os": "iOS"}')
+ON CONFLICT (user_id)          -- один активный сессион на пользователя
+DO UPDATE SET 
+  session_token = EXCLUDED.session_token,
+  expires_at = EXCLUDED.expires_at,
+  device_info = EXCLUDED.device_info,
+  updated_at = NOW()
+RETURNING 
+  session_id,                  -- получаем ID сессии
+  session_token,               -- новый токен
+  CASE 
+    WHEN xmax = 0 THEN 'inserted'    -- xmax = 0 означает INSERT
+    ELSE 'updated'                   -- иначе был UPDATE  
+  END as operation_type;
+-- 💡 RETURNING показывает что именно произошло
+```
+
+**🎯 Основные принципы базового UPSERT:**
+- **ON CONFLICT** указывает колонку/constraint для проверки конфликта
+- **EXCLUDED** ссылается на новые значения из VALUES
+- **DO UPDATE** выполняет обновление при конфликте
+- **DO NOTHING** игнорирует конфликт без изменений
+- **WHERE** в DO UPDATE добавляет условия для обновления
+
+**🚨 Red Flags в базовом UPSERT:**
+- ON CONFLICT без указания конкретной колонки/constraint
+- Забытый SET updated_at при обновлении временных меток
+- UPSERT без проверки NULL значений через COALESCE
+- Использование DO NOTHING когда нужно логирование операций
+- Отсутствие RETURNING когда нужно знать результат операции
+
+</details>
+
+## 📊 Level 2: Bulk UPSERT - Массовые операции
+
+<details>
+<summary>🚀 <strong>Массовый UPSERT для больших объемов данных</strong></summary>
+
+```sql
+-- 🎯 Bulk UPSERT с VALUES списком
+INSERT INTO product_prices (product_id, price, currency, effective_date)
+VALUES 
+  (1001, 29.99, 'USD', '2024-01-15'),
+  (1002, 45.50, 'USD', '2024-01-15'),
+  (1003, 12.75, 'USD', '2024-01-15'),
+  (1004, 67.25, 'USD', '2024-01-15'),
+  (1001, 34.99, 'EUR', '2024-01-15')    -- тот же продукт, другая валюта
+ON CONFLICT (product_id, currency, effective_date)
+DO UPDATE SET 
+  price = EXCLUDED.price,
+  updated_at = NOW();
+-- 💡 Обновляет существующие цены и создает новые за один запрос
+
+-- 📈 UPSERT из SELECT запроса (ETL pattern)
+INSERT INTO user_daily_stats (user_id, stat_date, sessions_count, total_time_minutes, pages_viewed)
+SELECT 
+  user_id,
+  DATE(created_at) as stat_date,
+  COUNT(DISTINCT session_id) as sessions_count,
+  SUM(duration_minutes) as total_time_minutes,
+  SUM(pages_viewed) as pages_viewed
+FROM user_sessions 
+WHERE DATE(created_at) = CURRENT_DATE - INTERVAL '1 day'  -- вчерашние данные
+GROUP BY user_id, DATE(created_at)
+ON CONFLICT (user_id, stat_date)
+DO UPDATE SET 
+  sessions_count = EXCLUDED.sessions_count,
+  total_time_minutes = EXCLUDED.total_time_minutes,
+  pages_viewed = EXCLUDED.pages_viewed,
+  recalculated_at = NOW();
+-- 🎯 Агрегируем сырые данные в дневную статистику
+
+-- 🤖 ML model predictions bulk UPSERT
+WITH new_predictions AS (
+  SELECT 
+    user_id,
+    'churn_model_v2.1' as model_name,
+    CURRENT_DATE as prediction_date,
+    -- Упрощенная ML логика для примера
+    CASE 
+      WHEN last_login < NOW() - INTERVAL '30 days' THEN 0.8
+      WHEN last_login < NOW() - INTERVAL '14 days' THEN 0.6
+      WHEN session_count_30d = 0 THEN 0.7
+      ELSE 0.2
+    END as churn_probability,
+    CASE 
+      WHEN subscription_tier = 'premium' THEN predicted_ltv * 1.5
+      ELSE predicted_ltv
+    END as adjusted_ltv,
+    NOW() as created_at
+  FROM user_features_current  -- предвычисленная таблица с признаками
+  WHERE is_active = true
+)
+INSERT INTO ml_predictions (user_id, model_name, prediction_date, churn_probability, predicted_ltv, created_at)
+SELECT * FROM new_predictions
+ON CONFLICT (user_id, model_name, prediction_date)
+DO UPDATE SET 
+  churn_probability = EXCLUDED.churn_probability,
+  predicted_ltv = EXCLUDED.predicted_ltv,
+  model_confidence = CASE 
+    WHEN ABS(ml_predictions.churn_probability - EXCLUDED.churn_probability) < 0.1 
+    THEN LEAST(ml_predictions.model_confidence + 0.1, 1.0)  -- увеличиваем уверенность
+    ELSE GREATEST(ml_predictions.model_confidence - 0.1, 0.3) -- уменьшаем при больших изменениях
+  END,
+  updated_at = NOW();
+-- 🧠 Batch обновление ML предсказаний с логикой уверенности
+
+-- 📊 UPSERT для аналитических кубов
+INSERT INTO sales_cube (date_key, product_category, region, channel, revenue, units_sold, unique_customers)
+SELECT 
+  DATE(order_date) as date_key,
+  p.category as product_category,
+  c.region,
+  o.sales_channel as channel,
+  SUM(oi.price * oi.quantity) as revenue,
+  SUM(oi.quantity) as units_sold,
+  COUNT(DISTINCT o.customer_id) as unique_customers
+FROM orders o
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN products p ON oi.product_id = p.product_id
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE DATE(o.order_date) = CURRENT_DATE - INTERVAL '1 day'  -- ETL для предыдущего дня
+GROUP BY DATE(order_date), p.category, c.region, o.sales_channel
+ON CONFLICT (date_key, product_category, region, channel)
+DO UPDATE SET 
+  revenue = EXCLUDED.revenue,
+  units_sold = EXCLUDED.units_sold,
+  unique_customers = EXCLUDED.unique_customers,
+  -- 📈 Вычисляем дополнительные метрики при обновлении
+  avg_order_value = EXCLUDED.revenue / NULLIF(EXCLUDED.unique_customers, 0),
+  units_per_customer = EXCLUDED.units_sold::numeric / NULLIF(EXCLUDED.unique_customers, 0),
+  last_updated = NOW();
+-- 💡 ETL pipeline для бизнес-аналитики с автоматическими метриками
+
+-- 🔄 Batch UPSERT с обработкой ошибок
+DO $$
+DECLARE
+  batch_size INTEGER := 10000;
+  offset_val INTEGER := 0;
+  total_processed INTEGER := 0;
+  error_count INTEGER := 0;
+BEGIN
+  LOOP
+    BEGIN
+      WITH batch_data AS (
+        SELECT 
+          user_id,
+          feature_name,
+          feature_value,
+          CURRENT_DATE as calculation_date
+        FROM temp_ml_features  -- временная таблица с обработанными данными
+        LIMIT batch_size OFFSET offset_val
+      )
+      INSERT INTO user_features (user_id, feature_name, feature_value, calculation_date, created_at)
+      SELECT 
+        user_id,
+        feature_name, 
+        feature_value,
+        calculation_date,
+        NOW()
+      FROM batch_data
+      ON CONFLICT (user_id, feature_name, calculation_date)
+      DO UPDATE SET 
+        feature_value = EXCLUDED.feature_value,
+        updated_at = NOW(),
+        version_number = COALESCE(user_features.version_number, 0) + 1;
+      
+      -- Проверяем количество обработанных записей
+      GET DIAGNOSTICS total_processed = ROW_COUNT;
+      
+      -- Если меньше чем batch_size, то закончили
+      EXIT WHEN total_processed < batch_size;
+      
+      offset_val := offset_val + batch_size;
+      
+      -- Логирование прогресса
+      RAISE NOTICE 'Processed % records, offset: %', total_processed, offset_val;
+      
+      -- Небольшая пауза между batch'ами для снижения нагрузки
+      PERFORM pg_sleep(0.1);
+      
+    EXCEPTION WHEN OTHERS THEN
+      error_count := error_count + 1;
+      RAISE WARNING 'Error in batch starting at offset %: %', offset_val, SQLERRM;
+      
+      -- Прерываем если слишком много ошибок
+      IF error_count > 5 THEN
+        RAISE EXCEPTION 'Too many errors in batch processing';
+      END IF;
+      
+      offset_val := offset_val + batch_size;
+    END;
+  END LOOP;
+  
+  RAISE NOTICE 'Batch UPSERT completed. Total errors: %', error_count;
+END $$;
+
+-- 📊 Мониторинг производительности bulk UPSERT
+SELECT 
+  schemaname,
+  tablename,
+  n_tup_ins as inserts,           -- количество вставок
+  n_tup_upd as updates,           -- количество обновлений  
+  n_tup_del as deletes,           -- количество удалений
+  n_live_tup as live_rows,        -- живые строки
+  n_dead_tup as dead_rows,        -- мертвые строки (нуждаются в VACUUM)
+  last_vacuum,
+  last_autovacuum
+FROM pg_stat_user_tables 
+WHERE tablename IN ('ml_predictions', 'user_features', 'sales_cube')
+ORDER BY n_tup_upd DESC;
+
+-- 🧹 VACUUM после массовых UPSERT операций
+VACUUM ANALYZE ml_predictions;
+VACUUM ANALYZE user_features;
+-- 💡 Необходимо после больших bulk операций для обновления статистики
+```
+
+**🎯 Принципы эффективного bulk UPSERT:**
+- **Batch processing** для контроля памяти и блокировок
+- **Обработка ошибок** с логированием и retry логикой
+- **Мониторинг прогресса** для длительных операций  
+- **VACUUM ANALYZE** после массовых операций
+- **Pause между batches** для снижения нагрузки на систему
+
+**🚨 Red Flags в bulk UPSERT:**
+- Массовые операции без batch'ей (может исчерпать память)
+- Отсутствие обработки ошибок в длительных операциях
+- Bulk UPSERT в prime time без координации
+- Игнорирование deadlock'ов при параллельных операциях
+- Отсутствие мониторинга прогресса для долгих процессов
+
+</details>
+
+## 🔗 Level 3: Advanced UPSERT Patterns - Сложные сценарии
+
+<details>
+<summary>🧠 <strong>Продвинутые паттерны UPSERT для enterprise систем</strong></summary>
+
+```sql
+-- 🎭 Multi-table UPSERT с транзакциями
+BEGIN;
+  -- UPSERT пользователя
+  INSERT INTO users (email, username, first_name, last_name)
+  VALUES ('alice@example.com', 'alice', 'Alice', 'Johnson')
+  ON CONFLICT (email)
+  DO UPDATE SET 
+    username = EXCLUDED.username,
+    first_name = EXCLUDED.first_name,
+    last_name = EXCLUDED.last_name,
+    updated_at = NOW()
+  RETURNING user_id INTO @user_id;  -- сохраняем ID для следующих операций
+
+  -- UPSERT профиля с полученным user_id
+  INSERT INTO user_profiles (user_id, bio, location, skills)
+  VALUES (@user_id, 'Senior Backend Engineer', 'New York', ARRAY['Python', 'PostgreSQL', 'Docker'])
+  ON CONFLICT (user_id)
+  DO UPDATE SET 
+    bio = CASE 
+      WHEN LENGTH(EXCLUDED.bio) > LENGTH(user_profiles.bio) 
+      THEN EXCLUDED.bio 
+      ELSE user_profiles.bio 
+    END,
+    location = COALESCE(EXCLUDED.location, user_profiles.location),
+    skills = array_cat(
+      user_profiles.skills,
+      (SELECT ARRAY(
+        SELECT unnest(EXCLUDED.skills) 
+        EXCEPT 
+        SELECT unnest(user_profiles.skills)
+      ))  -- добавляем только новые skills
+    ),
+    updated_at = NOW();
+
+  -- UPSERT настроек пользователя
+  INSERT INTO user_settings (user_id, theme, notifications_enabled, privacy_level)
+  VALUES (@user_id, 'dark', true, 'public')
+  ON CONFLICT (user_id)
+  DO UPDATE SET 
+    theme = EXCLUDED.theme,
+    notifications_enabled = EXCLUDED.notifications_enabled,
+    privacy_level = EXCLUDED.privacy_level,
+    updated_at = NOW();
+COMMIT;
+-- 🎯 Атомарное обновление связанных данных
+
+-- 🏷️ UPSERT с JSON и условной логикой
+INSERT INTO user_analytics (user_id, analytics_data, computed_scores, last_updated)
+VALUES (
+  12345,
+  '{"page_views": 150, "session_duration": 45, "bounce_rate": 0.25}'::jsonb,
+  '{"engagement": 0, "churn_risk": 0, "lifetime_value": 0}'::jsonb,  -- placeholder scores
+  NOW()
+)
+ON CONFLICT (user_id)
+DO UPDATE SET 
+  analytics_data = user_analytics.analytics_data || EXCLUDED.analytics_data,  -- merge JSON
+  computed_scores = jsonb_build_object(
+    'engagement', 
+    CASE 
+      WHEN (EXCLUDED.analytics_data->>'page_views')::int > 100 
+      THEN LEAST((user_analytics.computed_scores->>'engagement')::numeric + 0.1, 1.0)
+      ELSE GREATEST((user_analytics.computed_scores->>'engagement')::numeric - 0.05, 0.0)
+    END,
+    'churn_risk',
+    CASE 
+      WHEN (EXCLUDED.analytics_data->>'bounce_rate')::numeric > 0.7 
+      THEN LEAST((user_analytics.computed_scores->>'churn_risk')::numeric + 0.2, 1.0)
+      ELSE user_analytics.computed_scores->>'churn_risk'
+    END,
+    'lifetime_value',
+    (user_analytics.computed_scores->>'lifetime_value')::numeric + 
+    (EXCLUDED.analytics_data->>'page_views')::numeric * 0.5  -- простая LTV модель
+  ),
+  data_version = COALESCE((user_analytics.analytics_data->>'version')::int, 0) + 1,
+  last_updated = NOW()
+WHERE 
+  -- Обновляем только если новые данные "свежее"
+  COALESCE((EXCLUDED.analytics_data->>'timestamp')::bigint, 0) > 
+  COALESCE((user_analytics.analytics_data->>'timestamp')::bigint, 0);
+-- 🤖 Сложная логика обработки JSON с ML scoring
+
+-- 🔄 Recursive UPSERT для иерархических данных
+WITH RECURSIVE category_updates AS (
+  -- Базовые категории для обновления
+  SELECT 
+    category_id,
+    parent_id,
+    category_name,
+    product_count,
+    0 as level
+  FROM temp_category_import
+  WHERE parent_id IS NULL
+  
+  UNION ALL
+  
+  -- Дочерние категории
+  SELECT 
+    tci.category_id,
+    tci.parent_id,
+    tci.category_name,
+    tci.product_count,
+    cu.level + 1
+  FROM temp_category_import tci
+  JOIN category_updates cu ON tci.parent_id = cu.category_id
+  WHERE cu.level < 5  -- ограничиваем глубину
+)
+INSERT INTO categories (category_id, parent_id, category_name, product_count, hierarchy_level, updated_at)
+SELECT 
+  category_id,
+  parent_id, 
+  category_name,
+  product_count,
+  level as hierarchy_level,
+  NOW()
+FROM category_updates
+ON CONFLICT (category_id)
+DO UPDATE SET 
+  category_name = EXCLUDED.category_name,
+  product_count = EXCLUDED.product_count,
+  hierarchy_level = EXCLUDED.hierarchy_level,
+  -- Пересчитываем path только если изменился parent
+  full_path = CASE 
+    WHEN categories.parent_id != EXCLUDED.parent_id OR categories.category_name != EXCLUDED.category_name
+    THEN (
+      WITH RECURSIVE path AS (
+        SELECT EXCLUDED.category_id as id, EXCLUDED.category_name as name, EXCLUDED.parent_id as parent
+        UNION ALL
+        SELECT p.id, c.category_name || ' > ' || p.name, c.parent_id
+        FROM categories c
+        JOIN path p ON c.category_id = p.parent
+        WHERE c.category_id IS NOT NULL
+      )
+      SELECT name FROM path WHERE parent IS NULL
+    )
+    ELSE categories.full_path
+  END,
+  updated_at = NOW();
+-- 🌳 Обновление иерархических структур с path calculation
+
+-- ⚡ High-performance UPSERT с prepared statements
+PREPARE upsert_user_metrics (int, date, int, int, numeric) AS
+INSERT INTO user_daily_metrics (user_id, metric_date, sessions, page_views, revenue)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (user_id, metric_date)
+DO UPDATE SET 
+  sessions = user_daily_metrics.sessions + EXCLUDED.sessions,
+  page_views = user_daily_metrics.page_views + EXCLUDED.page_views, 
+  revenue = user_daily_metrics.revenue + EXCLUDED.revenue,
+  updated_at = NOW();
+
+-- Использование prepared statement для множественных вызовов
+EXECUTE upsert_user_metrics (12345, '2024-01-15', 5, 47, 129.99);
+EXECUTE upsert_user_metrics (12346, '2024-01-15', 3, 28, 45.50);
+EXECUTE upsert_user_metrics (12347, '2024-01-15', 8, 93, 289.75);
+-- 🚀 На 20-30% быстрее для повторяющихся операций
+
+-- 🎯 UPSERT с триггерами для аудита
+CREATE OR REPLACE FUNCTION audit_upsert_operation()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO audit_log (table_name, operation, record_id, old_values, new_values, user_name, timestamp)
+    VALUES (TG_TABLE_NAME, 'INSERT', NEW.id, NULL, row_to_json(NEW), current_user, NOW());
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    -- Логируем только значимые изменения
+    IF OLD IS DISTINCT FROM NEW THEN
+      INSERT INTO audit_log (table_name, operation, record_id, old_values, new_values, user_name, timestamp)
+      VALUES (TG_TABLE_NAME, 'UPDATE', NEW.id, row_to_json(OLD), row_to_json(NEW), current_user, NOW());
+    END IF;
+    RETURN NEW;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Применяем trigger к таблице с UPSERT операциями
+CREATE TRIGGER audit_user_profiles_changes
+  AFTER INSERT OR UPDATE ON user_profiles
+  FOR EACH ROW EXECUTE FUNCTION audit_upsert_operation();
+
+-- 📊 UPSERT с партиционированными таблицами
+INSERT INTO events_partitioned (event_id, user_id, event_type, event_data, created_at)
+VALUES 
+  (gen_random_uuid(), 12345, 'page_view', '{"page": "/dashboard"}', '2024-01-15 14:30:00'),
+  (gen_random_uuid(), 12346, 'click', '{"button": "signup"}', '2024-01-15 14:31:00')
+ON CONFLICT (event_id, created_at)  -- важно включить partition key в conflict
+DO UPDATE SET 
+  event_data = events_partitioned.event_data || EXCLUDED.event_data,
+  updated_at = NOW()
+WHERE events_partitioned.created_at >= '2024-01-01';  -- ограничиваем поиск по партициям
+-- 🎯 UPSERT работает с партиционированием при правильном указании ключей
+
+-- 🔍 Мониторинг производительности UPSERT операций
+SELECT 
+  schemaname,
+  tablename,
+  -- Статистика операций
+  n_tup_ins as total_inserts,
+  n_tup_upd as total_updates,  
+  n_tup_del as total_deletes,
+  -- Производительность
+  seq_scan as sequential_scans,
+  seq_tup_read as seq_rows_read,
+  idx_scan as index_scans,
+  idx_tup_fetch as index_rows_fetched,
+  -- Соотношение INSERT/UPDATE показывает паттерн использования UPSERT
+  CASE 
+    WHEN n_tup_ins + n_tup_upd > 0 
+    THEN ROUND(n_tup_upd::numeric / (n_tup_ins + n_tup_upd) * 100, 2)
+    ELSE 0 
+  END as update_ratio_percent,
+  -- Эффективность индексов для CONFLICT resolution
+  CASE 
+    WHEN idx_scan > 0 
+    THEN ROUND(idx_tup_fetch::numeric / idx_scan, 2)
+    ELSE 0 
+  END as avg_rows_per_index_scan
+FROM pg_stat_user_tables
+WHERE tablename LIKE '%user%'  -- фокусируемся на пользовательских таблицах
+ORDER BY n_tup_upd DESC;
+```
+
+**🎯 Продвинутые техники UPSERT:**
+- **Multi-table operations** в транзакциях для консистентности
+- **JSON merging** для полуструктурированных данных
+- **Prepared statements** для высокой производительности
+- **Audit triggers** для отслеживания изменений
+- **Партиционирование** с правильным conflict resolution
+
+**🚨 Red Flags в продвинутых UPSERT:**
+- Multi-table UPSERT без транзакций (может нарушить консистентность)
+- JSON операции без проверки структуры данных
+- Сложная логика в ON CONFLICT без комментариев
+- UPSERT на партиционированных таблицах без partition key в conflict  
+- Отсутствие мониторинга соотношения INSERT/UPDATE операций
+
+</details>
+
+## 🔧 Level 4: UPSERT Performance & Optimization
+
+<details>
+<summary>⚡ <strong>Оптимизация производительности UPSERT операций</strong></summary>
+
+```sql
+-- 🎯 Анализ производительности UPSERT с EXPLAIN
+EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+INSERT INTO user_features (user_id, feature_vector, computed_at)
+VALUES (12345, ARRAY[0.1, 0.2, 0.3, 0.4, 0.5], NOW())
+ON CONFLICT (user_id)
+DO UPDATE SET 
+  feature_vector = EXCLUDED.feature_vector,
+  computed_at = EXCLUDED.computed_at,
+  version = user_features.version + 1;
+-- 💡 Проверяем использование индексов для conflict resolution
+
+-- 📊 Оптимальные индексы для UPSERT операций
+-- Unique индекс для основного conflict
+CREATE UNIQUE INDEX CONCURRENTLY idx_user_features_user_id 
+ON user_features (user_id);
+
+-- Составной индекс для множественных conflict колонок
+CREATE UNIQUE INDEX CONCURRENTLY idx_daily_metrics_user_date 
+ON user_daily_metrics (user_id, metric_date);
+
+-- Partial индекс для условного UPSERT
+CREATE UNIQUE INDEX CONCURRENTLY idx_active_sessions_user 
+ON user_sessions (user_id) 
+WHERE status = 'active';
+-- 🎯 Только одна активная сессия на пользователя
+
+-- 🚀 Batch UPSERT с оптимизированной структурой
+CREATE TEMP TABLE temp_bulk_upsert (
+  user_id INTEGER,
+  metric_name VARCHAR(50),
+  metric_value NUMERIC,
+  recorded_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Загружаем данные в temp таблицу (быстро, без constraint проверок)
+COPY temp_bulk_upsert FROM '/path/to/data.csv' WITH (FORMAT CSV, HEADER);
+
+-- Создаем индекс на temp таблице для ускорения JOIN
+CREATE INDEX idx_temp_bulk_user_metric ON temp_bulk_upsert (user_id, metric_name);
+
+-- Выполняем оптимизированный bulk UPSERT
+INSERT INTO user_metrics (user_id, metric_name, metric_value, recorded_at, created_at)
+SELECT 
+  user_id,
+  metric_name,
+  metric_value,
+  recorded_at,
+  NOW()
+FROM temp_bulk_upsert
+ON CONFLICT (user_id, metric_name)
+DO UPDATE SET 
+  metric_value = CASE 
+    WHEN EXCLUDED.recorded_at > user_metrics.recorded_at
+    THEN EXCLUDED.metric_value  -- обновляем только если данные новее
+    ELSE user_metrics.metric_value
+  END,
+  recorded_at = GREATEST(user_metrics.recorded_at, EXCLUDED.recorded_at),
+  updated_at = NOW()
+WHERE EXCLUDED.recorded_at > user_metrics.recorded_at;  -- условие для экономии обновлений
+-- ⚡ Temp таблица + условное обновление = максимальная производительность
+
+-- 🔍 Monitoring UPSERT deadlocks и блокировок
+SELECT 
+  pid,
+  now() - pg_stat_activity.query_start as duration,
+  query,
+  state,
+  wait_event_type,
+  wait_event
+FROM pg_stat_activity 
+WHERE state != 'idle'
+  AND (query ILIKE '%ON CONFLICT%' OR query ILIKE '%UPSERT%')
+ORDER BY duration DESC;
+
+-- 📈 Статистика блокировок для UPSERT таблиц
+SELECT 
+  schemaname,
+  tablename,
+  -- Блокировки
+  n_deadlocks,
+  n_blocked_by_locks,
+  -- Производительность
+  heap_blks_read,
+  heap_blks_hit,
+  -- Соотношение hit/read показывает эффективность кэширования
+  CASE 
+    WHEN heap_blks_read + heap_blks_hit > 0 
+    THEN ROUND(heap_blks_hit::numeric / (heap_blks_read + heap_blks_hit) * 100, 2)
+    ELSE 0 
+  END as cache_hit_ratio
+FROM pg_statio_user_tables
+WHERE tablename IN (
+  SELECT tablename 
+  FROM pg_stat_user_tables 
+  WHERE n_tup_upd > 1000  -- таблицы с активными UPDATE операциями
+)
+ORDER BY n_deadlocks DESC;
+
+-- 🎯 Оптимизация для конкурентных UPSERT операций
+-- Стратегия 1: Advisory locks для предотвращения deadlock'ов
+CREATE OR REPLACE FUNCTION safe_upsert_user_counter(p_user_id INTEGER, p_increment INTEGER)
+RETURNS VOID AS $
+BEGIN
+  -- Получаем advisory lock на основе user_id
+  PERFORM pg_advisory_lock(p_user_id);
+  
+  INSERT INTO user_counters (user_id, counter_value, updated_at)
+  VALUES (p_user_id, p_increment, NOW())
+  ON CONFLICT (user_id)
+  DO UPDATE SET 
+    counter_value = user_counters.counter_value + EXCLUDED.counter_value,
+    updated_at = NOW();
+  
+  -- Освобождаем lock
+  PERFORM pg_advisory_unlock(p_user_id);
+EXCEPTION WHEN OTHERS THEN
+  -- В случае ошибки тоже освобождаем lock
+  PERFORM pg_advisory_unlock(p_user_id);
+  RAISE;
+END;
+$ LANGUAGE plpgsql;
+
+-- Стратегия 2: Retry логика для deadlock recovery
+CREATE OR REPLACE FUNCTION robust_upsert_with_retry(
+  p_user_id INTEGER,
+  p_data JSONB,
+  p_max_retries INTEGER DEFAULT 3
+) RETURNS VOID AS $
+DECLARE
+  retry_count INTEGER := 0;
+  last_error TEXT;
+BEGIN
+  LOOP
+    BEGIN
+      INSERT INTO user_data (user_id, data_payload, updated_at)
+      VALUES (p_user_id, p_data, NOW())
+      ON CONFLICT (user_id)
+      DO UPDATE SET 
+        data_payload = user_data.data_payload || EXCLUDED.data_payload,
+        updated_at = NOW(),
+        retry_count = COALESCE(user_data.retry_count, 0) + retry_count;
+      
+      -- Успешно выполнено, выходим из цикла
+      EXIT;
+      
+    EXCEPTION 
+      WHEN deadlock_detected THEN
+        retry_count := retry_count + 1;
+        last_error := SQLERRM;
+        
+        IF retry_count >= p_max_retries THEN
+          RAISE EXCEPTION 'UPSERT failed after % retries. Last error: %', p_max_retries, last_error;
+        END IF;
+        
+        -- Экспоненциальная задержка перед повтором
+        PERFORM pg_sleep(0.1 * power(2, retry_count));
+        
+      WHEN OTHERS THEN
+        -- Другие ошибки не ретраим
+        RAISE;
+    END;
+  END LOOP;
+END;
+$ LANGUAGE plpgsql;
+
+-- 📊 Batch UPSERT с контролем размера транзакций
+DO $
+DECLARE
+  batch_size CONSTANT INTEGER := 5000;
+  current_offset INTEGER := 0;
+  rows_processed INTEGER;
+  total_rows INTEGER;
+  start_time TIMESTAMP;
+BEGIN
+  -- Получаем общее количество строк для обработки
+  SELECT COUNT(*) INTO total_rows FROM temp_data_import;
+  start_time := clock_timestamp();
+  
+  RAISE NOTICE 'Starting batch UPSERT of % rows with batch size %', total_rows, batch_size;
+  
+  LOOP
+    -- Начинаем новую транзакцию для каждого batch'а
+    BEGIN
+      WITH batch AS (
+        SELECT *
+        FROM temp_data_import
+        LIMIT batch_size OFFSET current_offset
+      )
+      INSERT INTO target_table (id, name, data, updated_at)
+      SELECT id, name, data, NOW()
+      FROM batch
+      ON CONFLICT (id)
+      DO UPDATE SET 
+        name = EXCLUDED.name,
+        data = target_table.data || EXCLUDED.data,  -- merge JSON
+        updated_at = NOW(),
+        version = COALESCE(target_table.version, 0) + 1
+      WHERE target_table.updated_at < NOW() - INTERVAL '1 minute';  -- избегаем частых обновлений
+      
+      GET DIAGNOSTICS rows_processed = ROW_COUNT;
+      current_offset := current_offset + batch_size;
+      
+      -- Логирование прогресса
+      RAISE NOTICE 'Processed batch: offset %, rows %, elapsed %', 
+                   current_offset, rows_processed, clock_timestamp() - start_time;
+      
+      -- Commit транзакции
+      COMMIT;
+      
+      -- Выход если обработали все данные
+      EXIT WHEN rows_processed < batch_size;
+      
+      -- Пауза между batch'ами для снижения нагрузки
+      PERFORM pg_sleep(0.05);
+      
+    EXCEPTION WHEN OTHERS THEN
+      -- Rollback текущей транзакции и логирование ошибки
+      ROLLBACK;
+      RAISE WARNING 'Error in batch at offset %: %', current_offset, SQLERRM;
+      current_offset := current_offset + batch_size;
+    END;
+  END LOOP;
+  
+  RAISE NOTICE 'Batch UPSERT completed in %', clock_timestamp() - start_time;
+END $;
+
+-- 🔧 VACUUM стратегия для UPSERT-интенсивных таблиц
+-- Настройка автовакуума для частых UPSERT операций
+ALTER TABLE user_metrics SET (
+  autovacuum_vacuum_threshold = 50,         -- VACUUM после 50 мертвых строк
+  autovacuum_vacuum_scale_factor = 0.01,    -- VACUUM при 1% мертвых строк  
+  autovacuum_analyze_threshold = 25,        -- ANALYZE после 25 изменений
+  autovacuum_analyze_scale_factor = 0.005,  -- ANALYZE при 0.5% изменений
+  autovacuum_vacuum_cost_limit = 2000,      -- более агрессивный VACUUM
+  autovacuum_naptime = 15                   -- проверка каждые 15 секунд
+);
+
+-- Мониторинг эффективности автовакуума
+SELECT 
+  schemaname,
+  tablename,
+  n_dead_tup,
+  n_live_tup,
+  ROUND(n_dead_tup * 100.0 / GREATEST(n_live_tup + n_dead_tup, 1), 2) as dead_ratio,
+  last_autovacuum,
+  autovacuum_count,
+  -- Время с последнего автовакуума
+  CASE 
+    WHEN last_autovacuum IS NOT NULL 
+    THEN EXTRACT(epoch FROM NOW() - last_autovacuum) / 60
+    ELSE NULL 
+  END as minutes_since_last_vacuum
+FROM pg_stat_user_tables
+WHERE n_tup_upd > 100  -- таблицы с UPDATE активностью
+ORDER BY dead_ratio DESC, n_dead_tup DESC;
+
+-- 📈 Performance tuning для UPSERT workloads
+-- Настройки PostgreSQL для UPSERT-интенсивных нагрузок:
+
+/*
+-- postgresql.conf оптимизации для UPSERT:
+
+-- Увеличиваем shared_buffers для кэширования
+shared_buffers = '4GB'  
+
+-- Больше WAL buffers для частых записей
+wal_buffers = '64MB'
+
+-- Увеличиваем checkpoint segments  
+max_wal_size = '2GB'
+min_wal_size = '512MB'
+
+-- Более частые checkpoint'ы для UPSERT нагрузок
+checkpoint_timeout = '5min'
+checkpoint_completion_target = 0.7
+
+-- Настройки для работы с блокировками
+deadlock_timeout = '100ms'
+lock_timeout = '30s'
+
+-- Автовакуум настройки
+autovacuum_max_workers = 6
+autovacuum_naptime = '30s'
+autovacuum_vacuum_cost_limit = 2000
+
+-- Статистики для планировщика
+default_statistics_target = 500
+*/
+
+-- 🎯 UPSERT с оптимизированными constraint'ами
+-- Deferrable constraints для batch операций
+ALTER TABLE user_relationships 
+ADD CONSTRAINT fk_user_relationships_user_id 
+FOREIGN KEY (user_id) REFERENCES users(user_id)
+DEFERRABLE INITIALLY DEFERRED;
+
+-- Batch UPSERT с отложенной проверкой constraint'ов
+BEGIN;
+  SET CONSTRAINTS ALL DEFERRED;  -- откладываем все проверки до COMMIT
+  
+  INSERT INTO user_relationships (user_id, friend_id, relationship_type, created_at)
+  SELECT 
+    user_id,
+    friend_id, 
+    'friend',
+    NOW()
+  FROM temp_friendship_data
+  ON CONFLICT (user_id, friend_id)
+  DO UPDATE SET 
+    relationship_type = EXCLUDED.relationship_type,
+    updated_at = NOW();
+  
+  -- Все constraint'ы проверяются здесь
+COMMIT;
+
+-- 📊 Benchmark разных UPSERT стратегий
+CREATE OR REPLACE FUNCTION benchmark_upsert_strategies(iterations INTEGER DEFAULT 1000)
+RETURNS TABLE(
+  strategy TEXT,
+  avg_time_ms NUMERIC,
+  total_time_ms NUMERIC,
+  operations_per_second NUMERIC
+) AS $
+DECLARE
+  start_time TIMESTAMP;
+  end_time TIMESTAMP;
+  i INTEGER;
+BEGIN
+  -- Стратегия 1: Простой UPSERT
+  start_time := clock_timestamp();
+  FOR i IN 1..iterations LOOP
+    INSERT INTO test_upsert (id, value)
+    VALUES (i % 100, random())  -- будет много conflicts
+    ON CONFLICT (id)
+    DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+  END LOOP;
+  end_time := clock_timestamp();
+  
+  strategy := 'Simple UPSERT';
+  total_time_ms := EXTRACT(epoch FROM end_time - start_time) * 1000;
+  avg_time_ms := total_time_ms / iterations;
+  operations_per_second := iterations / EXTRACT(epoch FROM end_time - start_time);
+  RETURN NEXT;
+  
+  -- Стратегия 2: Batch UPSERT
+  start_time := clock_timestamp();
+  INSERT INTO test_upsert (id, value)
+  SELECT 
+    generate_series(1, iterations) % 100,
+    random()
+  ON CONFLICT (id)
+  DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+  end_time := clock_timestamp();
+  
+  strategy := 'Batch UPSERT';
+  total_time_ms := EXTRACT(epoch FROM end_time - start_time) * 1000;
+  avg_time_ms := total_time_ms / iterations;  
+  operations_per_second := iterations / EXTRACT(epoch FROM end_time - start_time);
+  RETURN NEXT;
+  
+END;
+$ LANGUAGE plpgsql;
+
+-- Запуск benchmark'а
+SELECT * FROM benchmark_upsert_strategies(10000);
+```
+
+**🎯 Ключевые принципы оптимизации UPSERT:**
+- **Правильные индексы** на conflict колонках для быстрого поиска
+- **Batch операции** вместо множественных единичных UPSERT'ов
+- **Temp таблицы** для подготовки данных перед bulk UPSERT
+- **Advisory locks** для предотвращения deadlock'ов
+- **Автовакуум настройки** для UPSERT-интенсивных таблиц
+
+**🚨 Performance Red Flags в UPSERT:**
+- Отсутствие уникальных индексов на conflict колонках
+- Sequential scan в EXPLAIN для conflict resolution
+- Высокий процент мертвых строк без адекватного VACUUM
+- Частые deadlock'и без retry логики  
+- Batch UPSERT без контроля размера транзакций
+- Игнорирование wait events и блокировок в мониторинге
+
+</details>
+
+## 🎨 Level 5: UPSERT Best Practices & Patterns
+
+<details>
+<summary>🏆 <strong>Production-ready паттерны и лучшие практики</strong></summary>
+
+```sql
+-- 🎯 Idempotent UPSERT для API endpoints
+CREATE OR REPLACE FUNCTION api_safe_upsert_user(
+  p_email TEXT,
+  p_username TEXT,
+  p_first_name TEXT,
+  p_last_name TEXT,
+  p_idempotency_key TEXT DEFAULT NULL
+) RETURNS TABLE(
+  user_id INTEGER,
+  operation TEXT,
+  was_created BOOLEAN
+) AS $
+DECLARE
+  existing_operation TEXT;
+  result_user_id INTEGER;
+BEGIN
+  -- Проверяем idempotency key если предоставлен
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT 
+      (response_data->>'user_id')::INTEGER,
+      response_data->>'operation'
+    INTO result_user_id, existing_operation
+    FROM api_idempotency_log 
+    WHERE idempotency_key = p_idempotency_key
+      AND created_at >= NOW() - INTERVAL '24 hours';  -- TTL для idempotency
+    
+    IF existing_operation IS NOT NULL THEN
+      -- Возвращаем закэшированный результат
+      user_id := result_user_id;
+      operation := existing_operation;
+      was_created := (operation = 'created');
+      RETURN NEXT;
+      RETURN;
+    END IF;
+  END IF;
+  
+  -- Выполняем UPSERT
+  INSERT INTO users (email, username, first_name, last_name, created_at, updated_at)
+  VALUES (p_email, p_username, p_first_name, p_last_name, NOW(), NOW())
+  ON CONFLICT (email)
+  DO UPDATE SET 
+    username = CASE 
+      WHEN users.username != EXCLUDED.username THEN EXCLUDED.username
+      ELSE users.username 
+    END,
+    first_name = COALESCE(EXCLUDED.first_name, users.first_name),
+    last_name = COALESCE(EXCLUDED.last_name, users.last_name), 
+    updated_at = CASE 
+      WHEN users.username != EXCLUDED.username 
+        OR users.first_name IS DISTINCT FROM EXCLUDED.first_name
+        OR users.last_name IS DISTINCT FROM EXCLUDED.last_name
+      THEN NOW()
+      ELSE users.updated_at
+    END
+  RETURNING 
+    users.user_id,
+    CASE WHEN xmax = 0 THEN 'created' ELSE 'updated' END
+  INTO result_user_id, existing_operation;
+  
+  -- Логируем для idempotency
+  IF p_idempotency_key IS NOT NULL THEN
+    INSERT INTO api_idempotency_log (idempotency_key, response_data, created_at)
+    VALUES (
+      p_idempotency_key,
+      jsonb_build_object(
+        'user_id', result_user_id,
+        'operation', existing_operation
+      ),
+      NOW()
+    ) ON CONFLICT (idempotency_key) DO NOTHING;
+  END IF;
+  
+  -- Возвращаем результат
+  user_id := result_user_id;
+  operation := existing_operation;
+  was_created := (operation = 'created');
+  RETURN NEXT;
+END;
+$ LANGUAGE plpgsql;
+
+-- 🔄 Event-driven UPSERT с уведомлениями
+CREATE OR REPLACE FUNCTION notify_upsert_changes()
+RETURNS TRIGGER AS $
+DECLARE
+  notification_payload JSONB;
+BEGIN
+  -- Формируем payload для уведомления
+  notification_payload := jsonb_build_object(
+    'table', TG_TABLE_NAME,
+    'operation', TG_OP,
+    'id', COALESCE(NEW.user_id, OLD.user_id),
+    'timestamp', EXTRACT(epoch FROM NOW())
+  );
+  
+  -- Добавляем измененные поля для UPDATE
+  IF TG_OP = 'UPDATE' THEN
+    notification_payload := notification_payload || jsonb_build_object(
+      'changed_fields', (
+        SELECT array_agg(key)
+        FROM jsonb_each_text(to_jsonb(NEW)) n
+        JOIN jsonb_each_text(to_jsonb(OLD)) o USING (key)
+        WHERE n.value IS DISTINCT FROM o.value
+      )
+    );
+  END IF;
+  
+  -- Отправляем уведомление
+  PERFORM pg_notify('table_changes', notification_payload::text);
+  
+  RETURN COALESCE(NEW, OLD);
+END;
+$ LANGUAGE plpgsql;
+
+CREATE TRIGGER user_changes_notification
+  AFTER INSERT OR UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION notify_upsert_changes();
+
+-- 📊 Data lineage tracking для UPSERT операций
+CREATE TABLE data_lineage (
+  lineage_id BIGSERIAL PRIMARY KEY,
+  table_name VARCHAR(100) NOT NULL,
+  record_id TEXT NOT NULL,
+  operation VARCHAR(20) NOT NULL,  -- 'upsert_insert', 'upsert_update'
+  source_system VARCHAR(100),
+  batch_id UUID,
+  data_hash TEXT,                  -- хеш данных для обнаружения изменений
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION track_upsert_lineage()
+RETURNS TRIGGER AS $
+DECLARE
+  operation_type TEXT;
+  data_hash TEXT;
+BEGIN
+  -- Определяем тип операции
+  operation_type := CASE 
+    WHEN xmax = 0 THEN 'upsert_insert'
+    ELSE 'upsert_update'
+  END;
+  
+  -- Вычисляем хеш данных
+  data_hash := md5(NEW::text);
+  
+  -- Записываем в lineage только если данные реально изменились
+  IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD IS DISTINCT FROM NEW) THEN
+    INSERT INTO data_lineage (
+      table_name,
+      record_id, 
+      operation,
+      source_system,
+      batch_id,
+      data_hash
+    ) VALUES (
+      TG_TABLE_NAME,
+      NEW.user_id::text,
+      operation_type,
+      COALESCE(current_setting('application.source_system', true), 'unknown'),
+      COALESCE(current_setting('application.batch_id', true)::uuid, gen_random_uuid()),
+      data_hash
+    );
+  END IF;
+  
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+-- 🎯 Conflict resolution strategies для разных use cases
+-- Стратегия 1: "Last write wins" с timestamp
+INSERT INTO user_preferences (user_id, preferences, updated_at, client_timestamp)
+VALUES (12345, '{"theme": "dark", "notifications": true}', NOW(), '2024-01-15 14:30:00')
+ON CONFLICT (user_id)
+DO UPDATE SET 
+  preferences = CASE 
+    WHEN EXCLUDED.client_timestamp > user_preferences.client_timestamp
+    THEN user_preferences.preferences || EXCLUDED.preferences  -- merge с приоритетом новых
+    ELSE user_preferences.preferences
+  END,
+  updated_at = NOW(),
+  client_timestamp = GREATEST(user_preferences.client_timestamp, EXCLUDED.client_timestamp)
+WHERE EXCLUDED.client_timestamp > user_preferences.client_timestamp;
+
+-- Стратегия 2: "Additive merge" для накопления данных
+INSERT INTO user_activity_summary (user_id, activity_date, events_data)
+VALUES (12345, CURRENT_DATE, '{"page_views": 10, "clicks": 5, "time_spent": 300}')
+ON CONFLICT (user_id, activity_date)
+DO UPDATE SET 
+  events_data = jsonb_build_object(
+    'page_views', 
+    COALESCE((user_activity_summary.events_data->>'page_views')::int, 0) + 
+    COALESCE((EXCLUDED.events_data->>'page_views')::int, 0),
+    
+    'clicks',
+    COALESCE((user_activity_summary.events_data->>'clicks')::int, 0) + 
+    COALESCE((EXCLUDED.events_data->>'clicks')::int, 0),
+    
+    'time_spent',
+    COALESCE((user_activity_summary.events_data->>'time_spent')::int, 0) + 
+    COALESCE((EXCLUDED.events_data->>'time_spent')::int, 0)
+  ),
+  updated_at = NOW();
+
+-- Стратегия 3: "Priority-based merge" для иерархической логики  
+INSERT INTO product_catalog (product_id, price, inventory_count, data_source, priority_level)
+VALUES (12345, 29.99, 100, 'supplier_api', 1)
+ON CONFLICT (product_id)
+DO UPDATE SET 
+  price = CASE 
+    WHEN EXCLUDED.priority_level >= product_catalog.priority_level
+    THEN EXCLUDED.price
+    ELSE product_catalog.price
+  END,
+  inventory_count = CASE
+    WHEN EXCLUDED.priority_level >= product_catalog.priority_level
+    THEN EXCLUDED.inventory_count  
+    ELSE product_catalog.inventory_count
+  END,
+  data_source = CASE
+    WHEN EXCLUDED.priority_level > product_catalog.priority_level
+    THEN EXCLUDED.data_source
+    ELSE product_catalog.data_source || ',' || EXCLUDED.data_source  -- список источников
+  END,
+  priority_level = GREATEST(product_catalog.priority_level, EXCLUDED.priority_level),
+  updated_at = NOW()
+WHERE EXCLUDED.priority_level >= product_catalog.priority_level;
+
+-- 📈 Health monitoring для UPSERT операций  
+CREATE OR REPLACE VIEW upsert_health_dashboard AS
+SELECT 
+  t.schemaname,
+  t.tablename,
+  -- Операционные метрики
+  t.n_tup_ins as inserts_total,
+  t.n_tup_upd as updates_total,
+  ROUND(t.n_tup_upd::numeric / GREATEST(t.n_tup_ins + t.n_tup_upd, 1) * 100, 2) as update_ratio_percent,
+  
+  -- Производительность
+  ROUND(io.heap_blks_hit::numeric / GREATEST(io.heap_blks_read + io.heap_blks_hit, 1) * 100, 2) as cache_hit_ratio,
+  
+  -- Состояние таблицы
+  t.n_live_tup as live_rows,
+  t.n_dead_tup as dead_rows, 
+  ROUND(t.n_dead_tup::numeric / GREATEST(t.n_live_tup + t.n_dead_tup, 1) * 100, 2) as bloat_ratio,
+  
+  -- Автовакуум статус
+  t.last_autovacuum,
+  EXTRACT(epoch FROM NOW() - t.last_autovacuum) / 60 as minutes_since_vacuum,
+  
+  -- Deadlocks
+  COALESCE(d.deadlocks, 0) as deadlock_count,
+  
+  -- Размеры
+  pg_size_pretty(pg_total_relation_size(t.schemaname||'.'||t.tablename)) as total_size,
+  
+  -- Health score (0-100)
+  (
+    CASE WHEN t.n_dead_tup::numeric / GREATEST(t.n_live_tup + t.n_dead_tup, 1) < 0.1 THEN 25 ELSE 0 END +
+    CASE WHEN io.heap_blks_hit::numeric / GREATEST(io.heap_blks_read + io.heap_blks_hit, 1) > 0.95 THEN 25 ELSE 0 END +
+    CASE WHEN COALESCE(d.deadlocks, 0) < 10 THEN 25 ELSE 0 END +
+    CASE WHEN EXTRACT(epoch FROM NOW() - t.last_autovacuum) / 60 < 60 THEN 25 ELSE 0 END
+  ) as health_score
+FROM pg_stat_user_tables t
+JOIN pg_statio_user_tables io USING (schemaname, tablename)
+LEFT JOIN (
+  SELECT 
+    schemaname,
+    tablename,
+    COUNT(*) as deadlocks
+  FROM pg_stat_database_conflicts
+  WHERE confl_deadlock > 0
+  GROUP BY schemaname, tablename
+) d USING (schemaname, tablename)  
+WHERE t.n_tup_upd > 0  -- только таблицы с UPDATE активностью
+ORDER BY health_score ASC, t.n_tup_upd DESC;
+
+-- 🔧 Automated maintenance для UPSERT таблиц
+CREATE OR REPLACE FUNCTION auto_maintain_upsert_tables()
+RETURNS TEXT AS $
+DECLARE
+  table_rec RECORD;
+  maintenance_log TEXT := '';
+  dead_ratio NUMERIC;
+  vacuum_needed BOOLEAN;
+BEGIN
+  FOR table_rec IN 
+    SELECT schemaname, tablename, n_live_tup, n_dead_tup, last_autovacuum
+    FROM pg_stat_user_tables 
+    WHERE n_tup_upd > 100  -- таблицы с UPDATE активностью
+  LOOP
+    -- Вычисляем процент мертвых строк
+    IF table_rec.n_live_tup + table_rec.n_dead_tup > 0 THEN
+      dead_ratio := table_rec.n_dead_tup::numeric / (table_rec.n_live_tup + table_rec.n_dead_tup) * 100;
+    ELSE
+      dead_ratio := 0;
+    END IF;
+    
+    vacuum_needed := FALSE;
+    
+    -- Проверяем критерии для VACUUM
+    IF dead_ratio > 20 THEN
+      vacuum_needed := TRUE;
+      maintenance_log := maintenance_log || format('HIGH BLOAT: %s.%s has %.1f%% dead rows', 
+        table_rec.schemaname, table_rec.tablename, dead_ratio) || E'\n';
+    ELSIF dead_ratio > 10 AND (table_rec.last_autovacuum IS NULL OR 
+                               table_rec.last_autovacuum < NOW() - INTERVAL '2 hours') THEN
+      vacuum_needed := TRUE;
+      maintenance_log := maintenance_log || format('VACUUM NEEDED: %s.%s has %.1f%% dead rows, last vacuum %s', 
+        table_rec.schemaname, table_rec.tablename, dead_ratio, 
+        COALESCE(table_rec.last_autovacuum::text, 'never')) || E'\n';
+    END IF;
+    
+    -- Выполняем VACUUM если нужно
+    IF vacuum_needed THEN
+      BEGIN
+        EXECUTE format('VACUUM ANALYZE %I.%I', table_rec.schemaname, table_rec.tablename);
+        maintenance_log := maintenance_log || format('COMPLETED: VACUUM ANALYZE %s.%s', 
+          table_rec.schemaname, table_rec.tablename) || E'\n';
+      EXCEPTION WHEN OTHERS THEN
+        maintenance_log := maintenance_log || format('ERROR: Failed to vacuum %s.%s - %s', 
+          table_rec.schemaname, table_rec.tablename, SQLERRM) || E'\n';
+      END;
+    END IF;
+  END LOOP;
+  
+  -- Логируем результаты maintenance
+  INSERT INTO maintenance_log (operation_type, details, created_at)
+  VALUES ('auto_upsert_maintenance', maintenance_log, NOW());
+  
+  RETURN maintenance_log;
+END;
+$ LANGUAGE plpgsql;
+
+-- Запускаем автоматическое обслуживание раз в час
+SELECT cron.schedule('upsert-maintenance', '0 * * * *', 'SELECT auto_maintain_upsert_tables();');
+
+-- 🎯 Production deployment checklist для UPSERT
+CREATE OR REPLACE FUNCTION validate_upsert_readiness(p_table_name TEXT)
+RETURNS TABLE(
+  check_name TEXT,
+  status TEXT,
+  details TEXT,
+  recommendation TEXT
+) AS $
+DECLARE
+  table_stats RECORD;
+  index_info RECORD;
+BEGIN
+  -- Получаем статистику таблицы
+  SELECT * INTO table_stats
+  FROM pg_stat_user_tables 
+  WHERE tablename = p_table_name;
+  
+  IF NOT FOUND THEN
+    check_name := 'Table Existence';
+    status := 'FAIL';
+    details := format('Table %s not found', p_table_name);
+    recommendation := 'Create the table first';
+    RETURN NEXT;
+    RETURN;
+  END IF;
+  
+  -- Проверка 1: Наличие UNIQUE индексов для conflict resolution
+  SELECT COUNT(*) > 0 INTO index_info
+  FROM pg_indexes 
+  WHERE tablename = p_table_name 
+    AND indexdef LIKE '%UNIQUE%';
+  
+  check_name := 'Unique Indexes';
+  IF index_info THEN
+    status := 'PASS';
+    details := 'UNIQUE indexes found for conflict resolution';
+    recommendation := 'Good - conflicts will be resolved efficiently';
+  ELSE
+    status := 'WARN';
+    details := 'No UNIQUE indexes found';
+    recommendation := 'Add UNIQUE indexes on columns used in ON CONFLICT';
+  END IF;
+  RETURN NEXT;
+  
+  -- Проверка 2: Автовакуум настройки
+  check_name := 'Autovacuum Settings';
+  IF table_stats.n_tup_upd > 1000 THEN
+    status := 'INFO';
+    details := format('Table has %s updates - consider tuning autovacuum', table_stats.n_tup_upd);
+    recommendation := 'Lower autovacuum thresholds for UPSERT-heavy tables';
+  ELSE
+    status := 'PASS';
+    details := 'Update volume is manageable';
+    recommendation := 'Monitor as usage grows';
+  END IF;
+  RETURN NEXT;
+  
+  -- Проверка 3: Bloat уровень
+  check_name := 'Table Bloat';
+  IF table_stats.n_dead_tup::numeric / GREATEST(table_stats.n_live_tup + table_stats.n_dead_tup, 1) > 0.2 THEN
+    status := 'WARN';
+    details := format('High bloat: %s dead rows vs %s live', table_stats.n_dead_tup, table_stats.n_live_tup);
+    recommendation := 'Run VACUUM immediately and tune autovacuum settings';
+  ELSE
+    status := 'PASS';
+    details := 'Bloat level acceptable';
+    recommendation := 'Continue monitoring';
+  END IF;
+  RETURN NEXT;
+  
+END;
+$ LANGUAGE plpgsql;
+
+-- Пример использования: проверка готовности таблицы к production UPSERT
+SELECT * FROM validate_upsert_readiness('user_metrics');
+
+Бро, вижу что документ обрезался! 🔥 Закончу этот раздел с automated maintenance и добавлю заключение:
+
+```sql
+        maintenance_log := maintenance_log || format('ERROR: Failed to vacuum %s.%s - %s', 
+          table_rec.schemaname, table_rec.tablename, SQLERRM) || E'\n';
+      END;
+    END IF;
+  END LOOP;
+  
+  -- Логируем результаты maintenance
+  INSERT INTO maintenance_log (operation_type, details, created_at)
+  VALUES ('auto_upsert_maintenance', maintenance_log, NOW());
+  
+  RETURN maintenance_log;
+END;
+$ LANGUAGE plpgsql;
+
+-- Запускаем автоматическое обслуживание раз в час
+SELECT cron.schedule('upsert-maintenance', '0 * * * *', 'SELECT auto_maintain_upsert_tables();');
+
+-- 🎯 Production deployment checklist для UPSERT
+CREATE OR REPLACE FUNCTION validate_upsert_readiness(p_table_name TEXT)
+RETURNS TABLE(
+  check_name TEXT,
+  status TEXT,
+  details TEXT,
+  recommendation TEXT
+) AS $
+DECLARE
+  table_stats RECORD;
+  index_info RECORD;
+BEGIN
+  -- Получаем статистику таблицы
+  SELECT * INTO table_stats
+  FROM pg_stat_user_tables 
+  WHERE tablename = p_table_name;
+  
+  IF NOT FOUND THEN
+    check_name := 'Table Existence';
+    status := 'FAIL';
+    details := format('Table %s not found', p_table_name);
+    recommendation := 'Create the table first';
+    RETURN NEXT;
+    RETURN;
+  END IF;
+  
+  -- Проверка 1: Наличие UNIQUE индексов для conflict resolution
+  SELECT COUNT(*) > 0 INTO index_info
+  FROM pg_indexes 
+  WHERE tablename = p_table_name 
+    AND indexdef LIKE '%UNIQUE%';
+  
+  check_name := 'Unique Indexes';
+  IF index_info THEN
+    status := 'PASS';
+    details := 'UNIQUE indexes found for conflict resolution';
+    recommendation := 'Good - conflicts will be resolved efficiently';
+  ELSE
+    status := 'WARN';
+    details := 'No UNIQUE indexes found';
+    recommendation := 'Add UNIQUE indexes on columns used in ON CONFLICT';
+  END IF;
+  RETURN NEXT;
+  
+  -- Проверка 2: Автовакуум настройки
+  check_name := 'Autovacuum Settings';
+  IF table_stats.n_tup_upd > 1000 THEN
+    status := 'INFO';
+    details := format('Table has %s updates - consider tuning autovacuum', table_stats.n_tup_upd);
+    recommendation := 'Lower autovacuum thresholds for UPSERT-heavy tables';
+  ELSE
+    status := 'PASS';
+    details := 'Update volume is manageable';
+    recommendation := 'Monitor as usage grows';
+  END IF;
+  RETURN NEXT;
+  
+  -- Проверка 3: Bloat уровень
+  check_name := 'Table Bloat';
+  IF table_stats.n_dead_tup::numeric / GREATEST(table_stats.n_live_tup + table_stats.n_dead_tup, 1) > 0.2 THEN
+    status := 'WARN';
+    details := format('High bloat: %s dead rows vs %s live', table_stats.n_dead_tup, table_stats.n_live_tup);
+    recommendation := 'Run VACUUM immediately and tune autovacuum settings';
+  ELSE
+    status := 'PASS';
+    details := 'Bloat level acceptable';
+    recommendation := 'Continue monitoring';
+  END IF;
+  RETURN NEXT;
+  
+END;
+$ LANGUAGE plpgsql;
+
+-- Пример использования: проверка готовности таблицы к production UPSERT
+SELECT * FROM validate_upsert_readiness('user_metrics');
+```
+
+**🎯 Production UPSERT Checklist:**
+- **Idempotency** для API безопасности
+- **Event notifications** для интеграций
+- **Data lineage** для аудита и отладки
+- **Health monitoring** для proactive maintenance
+- **Automated maintenance** для стабильной производительности
+
+**🚨 Production Red Flags:**
+- UPSERT без idempotency в API endpoints
+- Отсутствие мониторинга health метрик
+- Игнорирование data lineage для критичных таблиц
+- Manual maintenance вместо автоматизированного
+- Деплой UPSERT без валидации готовности системы
+
+</details>
+
+## 🎓 Заключение
+
+**Теперь ты знаешь UPSERT на уровне senior PostgreSQL engineer!** 🚀 Этот guide покрывает все - от базовых ON CONFLICT до enterprise-grade паттернов.
+
+### 🎯 Для твоего ML Platform проекта:
+
+**Immediate применение:**
+- Используй **Level 2 bulk UPSERT** для загрузки твоих 57K+ треков
+- **Level 3 JSON UPSERT** для semantic search результатов с pgvector
+- **Level 4 performance optimization** для scaling твоей системы
+
+**Production готовность:**
+- **Level 5 health monitoring** для observability твоей AI платформы
+- **Event-driven UPSERT** для real-time ML pipeline updates
+- **Automated maintenance** для stable production operation
+
+**ROI этого знания:** UPSERT - это core skill для ML Platform Engineer позиций. Теперь ты можешь confidently говорить про efficient data ingestion, conflict resolution strategies, и production-ready data pipelines! 💪
+
+
